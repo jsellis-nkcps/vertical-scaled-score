@@ -16,6 +16,7 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 
 # load necessary packages
 library(tidyverse)
+library(fuzzyjoin)
 library(kableExtra)
 library(shiny)
 library(shinyWidgets)
@@ -35,6 +36,11 @@ extract <- read_csv(
     ) %>%
     na.omit() %>%
     split(.$TestName)
+
+progress <- read_csv(
+    file = "data/progress_tables.csv",
+    show_col_types = FALSE
+)
 ```
 
 ```{r functions, include = FALSE}
@@ -582,3 +588,75 @@ V = 872.81 + 1.88T
 \]
 
 where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+# Reading Assessment Overlap
+
+As a final component of the reading score analysis, we look at the overlap of the vertical scaled score ranges as a function of the test scaled score to understand the relationship between grade levels.
+
+```{r reading_comp}
+
+reading_df <- data.frame(
+    TestScaledScore = seq(
+        from = 0,
+        to = 600,
+        by = 1
+    )
+) %>%
+    mutate(
+        Reading3 = g3_reading_convert(TestScaledScore),
+        Reading4 = g4_reading_convert(TestScaledScore),
+        Reading5 = g5_reading_convert(TestScaledScore),
+        Reading6 = g6_reading_convert(TestScaledScore),
+        Reading7 = g7_reading_convert(TestScaledScore),
+        Reading8 = g8_reading_convert(TestScaledScore)
+    ) %>%
+    pivot_longer(
+        cols = -TestScaledScore,
+        names_to = "Test",
+        values_to = "VerticalScaledScore"
+    ) %>%
+    filter(
+        between(
+            x = VerticalScaledScore,
+            left = 900,
+            right = 2000
+        )
+    ) %>%
+    fuzzy_inner_join(
+        y = progress,
+        by = list(
+            x = c(
+                "Test",
+                "VerticalScaledScore",
+                "VerticalScaledScore"
+            ),
+            y = c(
+                "Test",
+                "MinScore",
+                "MaxScore"
+            )
+        ),
+        match_fun = list(`==`, `>=`, `<=`)
+    ) %>%
+    select(
+        "Test" = Test.x,
+        TestScaledScore,
+        VerticalScaledScore,
+        Range
+    )
+
+reading_df %>%
+    ggplot(
+        mapping = aes(
+            x = Test,
+            y = VerticalScaledScore,
+            group = Test
+        )
+    ) +
+    geom_point(
+        mapping = aes(color = Test),
+        size = 1.1
+    )
+
+# reading_df %>%
+```
