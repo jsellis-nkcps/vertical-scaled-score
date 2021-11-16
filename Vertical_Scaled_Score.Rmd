@@ -1,0 +1,584 @@
+---
+title: "Examining the Relationship Between Test Scaled Score and Vertical Scaled Score"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: default
+    highlight: tango
+runtime: shiny
+---
+
+```{r setup, include = FALSE}
+# global options
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# load necessary packages
+library(tidyverse)
+library(kableExtra)
+library(shiny)
+library(shinyWidgets)
+
+# load data and transform
+extract <- read_csv(
+    file = "data/extract_sp2021.csv",
+    show_col_types = FALSE
+) %>%
+    select(
+        TestName = `Test Name`, 
+        TestScaledScore = `Test Scaled Score`,
+        VerticalScaledScore = `Vertical Scale`
+    ) %>%
+    mutate(
+        TestScaledScore = as.numeric(TestScaledScore)
+    ) %>%
+    na.omit() %>%
+    split(.$TestName)
+```
+
+```{r functions, include = FALSE}
+# function to produce data frame of summary values
+test_summary <- function(.data) {
+    return(
+        data.frame(
+            "Metric" = c("N", "Minimum", "Maximum", "Average"),
+            "TestScaledScore" = c(
+                nrow(.data),
+                round(min(.data$TestScaledScore), 0),
+                round(max(.data$TestScaledScore), 0),
+                round(mean(.data$TestScaledScore), 0)
+            ),
+            "VerticalScaledScore" = c(
+                nrow(.data),
+                round(min(.data$VerticalScaledScore), 0),
+                round(max(.data$VerticalScaledScore), 0),
+                round(mean(.data$VerticalScaledScore), 0)
+            )
+        )
+    )
+}
+
+# function to produce density plots
+gg_density <- function(.data, .subtitle) {
+    df <- .data %>%
+        pivot_longer(
+            cols = -TestName,
+            names_to = "ScoreType",
+            values_to = "Score"
+        )
+    
+    df %>% 
+        ggplot(
+            mapping = aes(
+                x = Score, 
+                color = ScoreType, 
+                fill = ScoreType, 
+                alpha = 0.7
+            )
+        ) + 
+        geom_density() + 
+        facet_wrap(
+            ~ ScoreType, 
+            scales = "free_x"
+        ) + 
+        theme(legend.position = "none") +
+        labs(
+            title = "Distribution of Test Scaled Score and Vertical Scaled Score",
+            subtitle = .subtitle,
+            x = "Score",
+            y = "Density"
+        )
+}
+
+# function to produce scatter plots with line of best fit
+gg_scatter <- function(.data, .subtitle) {
+    .data %>%
+        ggplot(
+            mapping = aes(
+                x = TestScaledScore,
+                y = VerticalScaledScore
+            )
+        ) +
+        geom_point(alpha = 0.7) +
+        geom_smooth(
+            method = lm, 
+            se = FALSE
+        ) +
+        scale_x_continuous(
+            breaks = seq(
+                from = 250,
+                to = 600,
+                by = 50
+            ),
+            labels = seq(
+                from = 250,
+                to = 600,
+                by = 50
+            )
+        ) +
+        labs(
+            title = "Comparison of Test Scaled Score and Vertical Scaled Score",
+            subtitle = .subtitle,
+            x = "Test Scaled Score",
+            y = "Vertical Scaled Score"
+        )
+}
+
+```
+
+# Introduction
+
+This report details the steps taken to analyze the relationship between a student's test scaled score and vertical scaled score on Virginia Assessment Program (VAP) assessments. The data used to conduct this analysis is the most recent Standards of Learning (SOL) test data for reading and mathematics in grades 3 through 8 from the Spring 2021 administration. No identifying information is kept in the raw data to preserve student anonymity and privacy.
+
+# TL;DR
+
+You can use the dropdown menu to select a test, then enter a score and press submit to convert from test scaled score to vertical scaled score or vice versa.
+
+```{r tldr, echo = FALSE, cache = FALSE}
+# get list of test names for dropdown menu
+tests <- names(extract)[-1]
+
+# dynamically generate the converted score
+output <- eventReactive(input$convert, {
+    input_score <- isolate(as.numeric(input$score))
+    output_score <- switch(
+        input$test,
+        "Gr 3 Math CAT" = g3_math_convert(input_score),
+        "Gr 3 Reading CAT" = g3_reading_convert(input_score),
+        "Gr 4 Math CAT" = g4_math_convert(input_score),
+        "Gr 4 Reading CAT" = g4_reading_convert(input_score),
+        "Gr 5 Math CAT" = g5_math_convert(input_score),
+        "Gr 5 Reading CAT" = g5_reading_convert(input_score),
+        "Gr 6 Math CAT" = g6_math_convert(input_score),
+        "Gr 6 Reading CAT" = g6_reading_convert(input_score),
+        "Gr 7 Math CAT" = g7_math_convert(input_score),
+        "Gr 7 Reading CAT" = g7_reading_convert(input_score),
+        "Gr 8 Math CAT" = g8_math_convert(input_score),
+        "Gr 8 Read (17) CAT" = g8_reading_convert(input_score),
+    )
+    
+    if (input_score <= 600) {
+        return(
+            div(style = "padding-top: 0.75em; padding-bottom: 0.75em",
+                h4(
+                    HTML(
+                        paste0(
+                            "You entered <strong><span style=\"color: green\">",
+                            input_score, "</span></strong>, which 
+                            is a <strong><em>TEST SCALED SCORE</em></strong>. 
+                            </br>
+                            </br>
+                            The corresponding <strong><em>VERTICAL SCALED SCORE
+                            </em></strong> is <strong><span style=\"color: green\">", 
+                            output_score, "</span></strong>."
+                        )
+                    )
+                )
+            )
+        )
+    } else {
+        return(
+            div(style = "padding-top: 0.75em; padding-bottom: 0.75em",
+                h4(
+                    HTML(
+                        paste0(
+                            "You entered <strong><span style=\"color: green\">",
+                            input_score, "</span></strong>, which 
+                            is a <strong><em>VERTICAL SCALED SCORE</em></strong>. 
+                            </br>
+                            </br>
+                            The corresponding <strong><em>TEST SCALED SCORE</em>
+                            </strong> is <strong><span style=\"color: green\">", 
+                            output_score, "</span></strong>."
+                        )
+                    )
+                )
+            )
+        )
+    }
+})
+
+fluidRow(
+    column(
+        width = 6,
+        # create a dropdown menu for the test
+        selectInput(
+            inputId = "test",
+            label = "Choose a test",
+            choices = tests
+        ),
+        
+        # create a text input for the score
+        textInput(
+            inputId = "score",
+            label = "Enter a score",
+            value = "",
+            placeholder = "Test Scaled Score or Vertical Scaled Score"
+        ),
+        
+        # create a button to run the score conversion
+        actionButton(
+            inputId = "convert",
+            label = "Convert Score",
+            class = "btn-primary"
+        )
+    ),
+    column(
+        width = 6,
+        # render the output with the converted score
+        renderUI({
+            panel(
+                output(),
+                status = "primary"
+            )
+        })
+    )
+)
+```
+
+# Reading Assessments
+
+We will begin the analysis with a look at the reading scores for each content tested.
+
+## 3rd Grade Reading
+
+For the 3rd grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g3_reading, echo = FALSE}
+# generate test summary
+g3_reading <- test_summary(extract$`Gr 3 Reading CAT`)
+
+# display the summary as a table
+g3_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 3 Reading CAT` %>%
+    gg_density("Grade 3 Reading")
+
+# generate linear model
+g3_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 3 Reading CAT`)
+
+# build third grade reading conversion function
+g3_reading_convert <- function(.score) {
+    intercept <- g3_reading_lm$coefficients[[1]]
+    slope = g3_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g3_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 3 Reading CAT` %>%
+    gg_scatter("Grade 3 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 632.9793 + 2.052755T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+## 4th Grade Reading
+
+For the 4th grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g4_reading, echo = FALSE}
+# generate test summary
+g4_reading <- test_summary(extract$`Gr 4 Reading CAT`)
+
+# display the summary as a table
+g4_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 4 Reading CAT` %>%
+    gg_density("Grade 4 Reading")
+
+# generate linear model
+g4_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 4 Reading CAT`)
+
+# build third grade reading conversion function
+g4_reading_convert <- function(.score) {
+    intercept <- g4_reading_lm$coefficients[[1]]
+    slope = g4_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g4_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 4 Reading CAT` %>%
+    gg_scatter("Grade 4 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 733.04 + 1.91T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+## 5th Grade Reading
+
+For the 5th grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g5_reading, echo = FALSE}
+# generate test summary
+g5_reading <- test_summary(extract$`Gr 5 Reading CAT`)
+
+# display the summary as a table
+g5_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 5 Reading CAT` %>%
+    gg_density("Grade 5 Reading")
+
+# generate linear model
+g5_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 5 Reading CAT`)
+
+# build third grade reading conversion function
+g5_reading_convert <- function(.score) {
+    intercept <- g5_reading_lm$coefficients[[1]]
+    slope = g5_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g5_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 5 Reading CAT` %>%
+    gg_scatter("Grade 5 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 724.44 + 2.05T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+## 6th Grade Reading
+
+For the 6th grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g6_reading, echo = FALSE}
+# generate test summary
+g6_reading <- test_summary(extract$`Gr 6 Reading CAT`)
+
+# display the summary as a table
+g6_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 6 Reading CAT` %>%
+    gg_density("Grade 6 Reading")
+
+# generate linear model
+g6_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 6 Reading CAT`)
+
+# build third grade reading conversion function
+g6_reading_convert <- function(.score) {
+    intercept <- g6_reading_lm$coefficients[[1]]
+    slope = g6_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g6_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 6 Reading CAT` %>%
+    gg_scatter("Grade 6 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 822.10 + 1.88T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+## 7th Grade Reading
+
+For the 7th grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g7_reading, echo = FALSE}
+# generate test summary
+g7_reading <- test_summary(extract$`Gr 7 Reading CAT`)
+
+# display the summary as a table
+g7_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 7 Reading CAT` %>%
+    gg_density("Grade 7 Reading")
+
+# generate linear model
+g7_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 7 Reading CAT`)
+
+# build third grade reading conversion function
+g7_reading_convert <- function(.score) {
+    intercept <- g7_reading_lm$coefficients[[1]]
+    slope = g7_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g7_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 7 Reading CAT` %>%
+    gg_scatter("Grade 7 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 852.53 + 1.89T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
+
+## 8th Grade Reading
+
+For the 8th grade reading assessment given during the Spring 2021 administration, students were assigned both a test scaled score and vertical scaled score. A summary of the scores, as well as density plots, are shown below.
+
+```{r g8_reading, echo = FALSE}
+# generate test summary
+g8_reading <- test_summary(extract$`Gr 8 Read (17) CAT`)
+
+# display the summary as a table
+g8_reading %>%
+    kbl() %>%
+    kable_styling(
+        bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    )
+
+# produce the density plots
+extract$`Gr 8 Read (17) CAT` %>%
+    gg_density("Grade 8 Reading")
+
+# generate linear model
+g8_reading_lm <- lm(VerticalScaledScore ~ TestScaledScore, data = extract$`Gr 8 Read (17) CAT`)
+
+# build third grade reading conversion function
+g8_reading_convert <- function(.score) {
+    intercept <- g8_reading_lm$coefficients[[1]]
+    slope = g8_reading_lm$coefficients[[2]]
+    
+    converted <- if_else(
+        condition = .score <= 600,
+        true = slope * .score + intercept,
+        false = (.score - intercept) / slope
+    )
+    
+    return(round(converted))
+}
+```
+
+\vspace{\baselineskip}
+
+We can also produce a scatter plot and the accompanying line of best fit.
+
+```{r g8_reading_fit, echo = FALSE}
+# produce the scatter plot with line of best fit
+extract$`Gr 8 Read (17) CAT` %>%
+    gg_scatter("Grade 8 Reading")
+```
+
+\vspace{\baselineskip}
+
+As we can see from the scatter plot and line of best fit, the relationship between test scaled score and vertical scaled score for Grade 3 Reading is perfectly linear. The relationship is modeled as:
+
+\[
+V = 872.81 + 1.88T
+\]
+
+where $V$ is the vertical scaled score and $T$ is the test scaled score.
